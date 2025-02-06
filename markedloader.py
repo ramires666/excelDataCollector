@@ -11,15 +11,43 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import NamedStyle
-from openpyxl.utils import get_column_letter
 from openpyxl import load_workbook
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 import numpy as np
+from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.utils import get_column_letter
+import pandas as pd
+import re
+import hashlib
 
 morph = MorphAnalyzer()
 
-import re
+# Словарь месяцев
+months = {
+    'январь': 1,
+    'февраль': 2,
+    'март': 3,
+    'апрель': 4,
+    'май': 5,
+    'июнь': 6,
+    'июль': 7,
+    'август': 8,
+    'сентябрь': 9,
+    'октябрь': 10,
+    'ноябрь': 11,
+    'декабрь': 12
+}
+
+def generate_hash(s, length=2):
+    """
+    Генерирует хэш для строки s и возвращает первые length символов.
+    """
+    if not isinstance(s, str):
+        s = str(s)
+    h = hashlib.sha256(s.encode()).hexdigest()
+    return h[:length]
 
 
 def extract_month_from_filename(filename):
@@ -38,11 +66,11 @@ def extract_month_from_filename(filename):
     words = re.findall(r'\w+', basename_no_ext)
 
     # Словарь месяцев
-    months = {
-        "январь": 1, "февраль": 2, "март": 3, "апрель": 4, "май": 5,
-        "июнь": 6, "июль": 7, "август": 8, "сентябрь": 9,
-        "октябрь": 10, "ноябрь": 11, "декабрь": 12
-    }
+    # months = {
+    #     "январь": 1, "февраль": 2, "март": 3, "апрель": 4, "май": 5,
+    #     "июнь": 6, "июль": 7, "август": 8, "сентябрь": 9,
+    #     "октябрь": 10, "ноябрь": 11, "декабрь": 12
+    # }
 
     for word in words:
         # Получаем нормальную форму слова
@@ -54,6 +82,22 @@ def extract_month_from_filename(filename):
     # Если месяц не найден
     return None, None
 
+
+def excel_column_to_index(column_letter):
+    """
+    Converts an Excel column letter to a zero-based index.
+
+    Args:
+        column_letter (str): The Excel column letter (e.g., 'A', 'B', ..., 'Z', 'AA', ...).
+
+    Returns:
+        int: The zero-based column index.
+    """
+    column_letter = column_letter.upper()  # Ensure uppercase for consistency
+    index = 0
+    for char in column_letter:
+        index = index * 26 + (ord(char) - ord('A') + 1)
+    return index - 1  # Convert to zero-based index
 
 def get_yellow_columns(file_path, sheet_name):
     # Загружаем книгу и выбираем лист
@@ -112,7 +156,7 @@ def is_valid_row(row):
     return False  # Если все значения являются целыми и не равны 0
 
 
-def fill_merged_cells_in_first_yellow_column(sheet, first_column):
+def fill_merged_cells_in_first_yellow_column1(sheet, first_column):
     """
     Заполняет объединённые ячейки в указанной колонке.
 
@@ -130,6 +174,70 @@ def fill_merged_cells_in_first_yellow_column(sheet, first_column):
             for row in range(start_row, end_row + 1):
                 if not sheet.row_dimensions[row].hidden:  # Пропускаем скрытые строки
                     sheet.cell(row=row, column=first_column).value = value  # Устанавливаем значение
+
+
+
+def fill_merged_cells_in_first_yellow_column(sheet, first_column):
+    """
+    Заполняет объединённые ячейки в указанной колонке.
+
+    :param sheet: объект листа Excel.
+    :param first_column: индекс первой жёлтой колонки (1-based).
+    """
+    # Собираем список объединённых диапазонов в указанном столбце
+    ranges_to_unmerge = [
+        merged_range
+        for merged_range in sheet.merged_cells.ranges
+        if merged_range.min_col == first_column and merged_range.max_col == first_column
+    ]
+
+    # Обрабатываем каждый диапазон отдельно
+    for merged_range in ranges_to_unmerge:
+        start_row = merged_range.min_row
+        end_row = merged_range.max_row
+        value = sheet.cell(row=start_row, column=first_column).value  # Читаем значение верхней левой ячейки
+
+        # Пытаемся разъединить ячейки, игнорируя ошибки KeyError
+        try:
+            sheet.unmerge_cells(str(merged_range))
+        except KeyError:
+            pass
+
+        # Заполняем ранее объединённые ячейки значением из верхней левой
+        for row in range(start_row, end_row + 1):
+            if not sheet.row_dimensions[row].hidden:  # Пропускаем скрытые строки
+                sheet.cell(row=row, column=first_column).value = value
+
+
+# from openpyxl import load_workbook
+
+
+def unmerge_horizontal_cells(sheet):
+    # # Load the workbook and select the sheet
+    # workbook = load_workbook(file_path)
+    # sheet = workbook[sheet_name]
+
+    # Iterate over all merged cell ranges in the sheet
+    for merged_cell_range in list(sheet.merged_cells.ranges):
+        # Check if the merge is horizontal (spans multiple columns but only one row)
+        if merged_cell_range.min_row == merged_cell_range.max_row:
+            # Get the value from the first cell in the merged range
+            first_cell = sheet.cell(row=merged_cell_range.min_row, column=merged_cell_range.min_col)
+            value = first_cell.value
+
+            # Check if the value contains the search string
+            if value and "того" in str(value):
+                # Unmerge the cells
+                sheet.unmerge_cells(str(merged_cell_range))
+
+                # Write the value from the first cell into all the cells that were previously merged
+                for col in range(merged_cell_range.min_col, merged_cell_range.max_col + 1):
+                    cell = sheet.cell(row=merged_cell_range.min_row, column=col)
+                    cell.value = value
+
+
+
+
 
 
 def convert_xls_to_xlsx(xls_file_path, xlsx_file_path):
@@ -163,7 +271,6 @@ def convert_xlsb_to_xlsx_with_formatting(xlsb_file_path, xlsx_file_path):
         excel.Quit()
 
 
-
 def convert_xls_to_xlsx_with_formatting(xls_file_path, xlsx_file_path):
     """
     Конвертирует файл .xls в .xlsx с сохранением форматирования.
@@ -183,8 +290,91 @@ def convert_xls_to_xlsx_with_formatting(xls_file_path, xlsx_file_path):
         excel.Quit()
 
 
+def filter_columns_with_whole_number_sums(df, columns_to_check=["Ruda",	"Cu",	"Ag",	"fRuda",	"fCu",	"fAg"]):
+    """
+    Filters out rows from a DataFrame where the sum of specified columns is an integer.
 
-def load_excel_data_with_flex(folder_path):
+    Parameters:
+        df (pd.DataFrame): The input DataFrame.
+        columns_to_check (list): List of column names to check.
+
+    Returns:
+        pd.DataFrame: A DataFrame with rows removed where the sum of specified columns is an integer.
+    """
+    # Create a copy of the DataFrame to avoid modifying the original
+    filtered_df = df.copy()
+
+    # Iterate through each row
+    for index, row in filtered_df.iterrows():
+        # Calculate the sum of the specified columns for the current row
+        row_sum = 0
+        has_non_numeric = False
+
+        for col in columns_to_check:
+            value = row[col]
+
+            # Skip if the cell is missing or empty
+            if pd.isna(value) or value == '':
+                continue
+
+            # Check if the value is numeric
+            try:
+                float_value = float(value)  # Convert to float
+                row_sum += float_value
+            except (ValueError, TypeError):
+                # If conversion to float fails, it's a non-numeric value
+                has_non_numeric = True
+                break  # No need to continue for this row
+
+        # Skip rows with non-numeric values
+        if has_non_numeric:
+            # print(f"Row {index} contains non-numeric values and will be skipped.")
+            continue
+
+        # Check if the sum is an integer
+        if row_sum == int(row_sum):  # Compare the sum to its integer version
+            # print(f"Row {index} has an integer sum ({row_sum}) and will be removed.")
+            filtered_df.drop(index, inplace=True)  # Drop the row
+
+    return filtered_df
+
+
+def forward_fill_column_by_index(sheet, column_index):
+    """
+    Forward fills empty cells in a specific column of a Worksheet or DataFrame using the column index.
+
+    Parameters:
+        sheet (Worksheet or pd.DataFrame): The input Worksheet or DataFrame.
+        column_index (int): The index of the column to process.
+
+    Returns:
+        pd.DataFrame: The DataFrame with empty cells in the specified column forward-filled.
+    """
+    # Convert the Worksheet to a DataFrame if it's not already one
+    if not isinstance(sheet, pd.DataFrame):
+        # Read the Worksheet into a DataFrame
+        data = sheet.values
+        columns = next(data)  # First row is the header
+        sheet = pd.DataFrame(data, columns=columns)
+
+    # Create a copy of the DataFrame to avoid modifying the original
+    filled_sheet = sheet.copy()
+
+    # Iterate through the rows
+    for i in range(len(filled_sheet) - 1):  # Stop at the second-to-last row
+        current_value = filled_sheet.iat[i, column_index]
+        next_value = filled_sheet.iat[i + 1, column_index]
+
+        # Check if the next value is empty (NaN or empty string)
+        if pd.isna(next_value) or next_value == '':
+            # Fill the next row with the current value
+            filled_sheet.iat[i + 1, column_index] = current_value
+
+    return filled_sheet
+
+
+
+def load_excel_data_with_flex(folder_path,tip=1):
     """Загружает данные из Excel файлов, учитывая возможные вариации в названиях месяцев в именах файлов."""
     # Шаг 1: Конвертируем все .xls файлы в .xlsx
     xls_files = glob(os.path.join(folder_path, "*.xls"))
@@ -213,14 +403,11 @@ def load_excel_data_with_flex(folder_path):
                 print(f"Ошибка при конвертации файла {xlsb_file}: {e}")
                 continue  # Переходим к следующему файлу, если конвертация не удалась
 
-
-
     # Шаг 2: Обрабатываем только .xlsx файлы
     xlsx_files = glob(os.path.join(folder_path, "*.xlsx"))
 
-    final_columns = ['Horizont','Panel', 'Shtrek', 'Ruda', 'Cu', 'Ag', 'fRuda', 'fCu', 'fAg', 'Uchastok', 'month']
+    final_columns = ['Horizont', 'Panel', 'Shtrek', 'Ruda', 'Cu', 'Ag', 'fRuda', 'fCu', 'fAg', 'Uchastok', 'month', 'Block']
     final_df = pd.DataFrame(columns=final_columns)
-
 
     for file_path in xlsx_files:
         file_name = os.path.basename(file_path)
@@ -246,7 +433,6 @@ def load_excel_data_with_flex(folder_path):
         for sheet_name in visible_sheets:
             ws = wb[sheet_name]
 
-
             print(f"\n>>>>>>>>>>>>>>>>   {last_folder_name} == {month_name} ===  {sheet_name}  <<<<<<<<<<<<<<<<<<<<<<<<<<")
             # print(file_name)
 
@@ -261,14 +447,22 @@ def load_excel_data_with_flex(folder_path):
                 print(f"No yellow columns found in sheet '{sheet_name}' in file '{file_name}'.")
                 continue
 
-            # Берём первую жёлтую колонку
-            first_yellow_column = yellow_cols[0]  # Первую жёлтую колонку (1-based)
+            # Берём индекс первой желтой колонки (0-based)
+            first_yellow_index = yellow_cols[0]
+            # Вычисляем индекс колонки непосредственно перед первой желтой
+            extra_col_index = first_yellow_index - 1
 
             # Заполняем объединённые ячейки только в первой жёлтой колонке =+1 так как нумерация в ексель с 1
-            fill_merged_cells_in_first_yellow_column(ws, first_yellow_column+1)
+            fill_merged_cells_in_first_yellow_column(ws, first_yellow_index)
+            fill_merged_cells_in_first_yellow_column(ws, first_yellow_index + 1)
             # и во второй
-            fill_merged_cells_in_first_yellow_column(ws, first_yellow_column + 2)
+            fill_merged_cells_in_first_yellow_column(ws, first_yellow_index + 2)
 
+            # unmerge and fill the "ИТОГО" for filtering
+            unmerge_horizontal_cells(ws)
+
+            # forward fill panel columns
+            forward_fill_column_by_index(ws, first_yellow_index)
 
             # Try to load data and set columns
             data_rows = []
@@ -291,6 +485,41 @@ def load_excel_data_with_flex(folder_path):
             # Filter yellow columns
             data = data.iloc[:, yellow_cols]
 
+            # Take the very first column returned by get_yellow_columns
+            col_before_yellow = yellow_cols[0]
+
+            # Debugging: Print the column name and type
+            # print(f"Column before first yellow column: {col_before_yellow}")
+            # print(f"Type of data[col_before_yellow]: {type(data.iloc[:, col_before_yellow])}")
+
+            # # Create a 'Block' column by cumulatively counting 'Итог' occurrences
+            # data['Block'] = (data.iloc[:, col_before_yellow].astype(str).str.lower().str.contains('того')).cumsum() + 1
+            #
+            # # Remove rows where 'Итог' is present in the column before the first yellow column
+            # data = data[~data.iloc[:, col_before_yellow].astype(str).str.lower().str.contains('того')]
+
+            # Normalize and debug
+
+            # print("Raw column values:", data.iloc[:, col_before_yellow].unique())
+
+            col_before_yellow = yellow_cols[0]-1
+
+            matches = (
+                data.iloc[:, col_before_yellow]
+                .astype(str)  # Ensure all values are strings
+                .str.strip()  # Remove leading/trailing spaces
+                .str.lower()  # Normalize case
+                .str.contains('того')  # Search for 'того'
+            )
+
+            # print("Matching rows:", matches)
+
+            # Add Block column
+            data['Block'] = matches.cumsum() + 1
+
+            # Remove rows with 'того'
+            data = data[~matches]
+
             # Set appropriate columns based on the sheet name
             if 'ОГР' in sheet_name.upper():
                 ogr_columns = ['Panel', 'Ruda', 'Cu', 'fRuda', 'fCu', 'Ag', 'fAg']
@@ -301,8 +530,11 @@ def load_excel_data_with_flex(folder_path):
                     print(f"Warning: Sheet '{sheet_name}' has unexpected number of columns for OGR sheet.")
                     continue
             else:
-                standard_columns = ['Horizont','Panel', 'Shtrek', 'Ruda', 'Cu', 'Ag', 'fRuda', 'fCu', 'fAg']   # STANDART
-                standard_columns = ['Horizont','Panel', 'Shtrek', 'Ruda', 'Cu', 'fRuda', 'fCu', 'Ag', 'fAg']       # Nurkazgan
+                match tip:
+                    case 1:
+                        standard_columns = ['Horizont', 'Panel', 'Shtrek', 'Ruda', 'Cu', 'Ag', 'fRuda', 'fCu', 'fAg', 'Block']   # STANDART
+                    case 2:
+                        standard_columns = ['Horizont', 'Panel', 'Shtrek', 'Ruda', 'Cu', 'fRuda', 'fCu', 'Ag', 'fAg', 'Block']   # Nurkazgan
                 if len(data.columns) == len(standard_columns):
                     data.columns = standard_columns
                 else:
@@ -324,7 +556,11 @@ def load_excel_data_with_flex(folder_path):
             data = data.iloc[1:]  # Пропускаем первую строку
 
             # Применение фильтра только целые числа
-            data = data[data.apply(is_valid_row, axis=1)]
+            # data = data[data.apply(is_valid_row, axis=1)]
+
+            #filterout complete integers its not wo we need
+            data = filter_columns_with_whole_number_sums(data)
+
 
             data['Uchastok'] = sheet_name
             data['month'] = month_name
@@ -337,17 +573,49 @@ def load_excel_data_with_flex(folder_path):
             data = data[final_columns]
             # Filter rows where both Ruda and fRuda are 0
             data = data[~((data['Ruda'] == 0) & (data['fRuda'] == 0))]
+            # data = data[(pd.notna(data['Ruda']) & pd.notna(data['fRuda'])) & ~((data['Ruda'] == 0) & (data['fRuda'] == 0))]
+
+            # data = data[
+            #     ~((data['Cu'].apply(lambda x: isinstance(x, int))) &
+            #     (data['Ag'].apply(lambda x: isinstance(x, int))) &
+            #     (data['fCu'].apply(lambda x: isinstance(x, int))) &
+            #     (data['fAg'].apply(lambda x: isinstance(x, int)))
+            #       )
+            #     ]
+            data = data[~(data['fAg'] == "кг") ]
+
+            # String to search for
+            search_string = 'того'
+
+            # # Specific columns to check for the string
+            # columns_to_check = ['Panel', 'Shtrek', 'Horizont']
+            # # Filter out rows where the search string appears in any of the specified columns
+            # data = data[~data[columns_to_check].apply(
+            #     lambda row: row.astype(str).str.contains(search_string, case=False, na=False).any(), axis=1)]
+
+            condition0 = data['Panel'].str.contains(search_string, case=False, na=False)
+            condition1 = data['Shtrek'].str.contains(search_string, case=False, na=False)
+            condition2 = data['Horizont'].str.contains(search_string, case=False, na=False)
+            condition = condition0 | condition1 | condition2
+            data = data[~condition]
+
 
             final_df = pd.concat([final_df, data], ignore_index=True)
 
-            final_df = add_calculated_columns(final_df)
+            # final_df = add_calculated_columns(final_df)
 
     final_df = final_df[~((final_df['Ruda'] == 0) & (final_df['fRuda'] == 0))]
 
+    # Add a new column for month order based on the mapping
+    final_df['month_N'] = final_df['month'].map(months)
+    # Sort the DataFrame by 'month_order' and then by 'Block'
+    final_df = final_df.sort_values(by=['month_N', 'Block'])
+    # Drop the temporary 'month_order' column if not needed
+    final_df = final_df.drop(columns=['month_N'])
 
     # Save the final DataFrame to a single Excel file
     # Use folder name as output file name
-    t = datetime.now().microsecond
+    # t = datetime.now().microsecond
     # output_file_name = os.path.basename("_report "+folder_path.strip('/\\')) +str(t)+ '.xlsx'
     # output_file = os.path.join(folder_path, output_file_name)
 
@@ -359,7 +627,7 @@ def load_excel_data_with_flex(folder_path):
 def add_summary_and_formula_rows1(output_file):
     # Load the workbook and select the first sheet
     workbook = load_workbook(output_file)
-    sheet = workbook["Данные"]  # Adjust this to your first sheet name if different
+    sheet = workbook["По штрекам"]  # Adjust this to your first sheet name if different
 
     # Find the last row with data
     last_row = sheet.max_row
@@ -406,7 +674,7 @@ def add_summary_and_formula_rows1(output_file):
 def add_summary_and_formula_rows(output_file):
     # Load the workbook and select the first sheet
     workbook = load_workbook(output_file)
-    sheet = workbook["Данные"]  # Adjust this to your first sheet name if different
+    sheet = workbook["По штрекам"]  # Adjust this to your first sheet name if different
 
     # Find the last row with data
     last_row = sheet.max_row
@@ -472,14 +740,49 @@ def add_summary_and_formula_rows(output_file):
 
 
 
-def generate_report_with_charts(folder_path, final_df):
-    # Функции для агрегации и обработки данных
-    aggregated_df = aggregate_and_calculate(final_df)
-    monthly_avg_df = calculate_monthly_averages(aggregated_df)
-    monthly_percent_df = calculate_monthly_average_percentages(final_df)
+def generate_report_with_charts(folder_path, full_df):
 
-    monthly_avg_df = process_monthly_avg(monthly_avg_df)
-    monthly_percent_df = process_monthly_avg(monthly_percent_df)
+    # # Удаление указанных столбцов из DataFrame перед записью в Excel
+    # full_df = full_df.drop(columns=["diff-Ruda", "diff-Cu", "diff-Ag"], errors='ignore')
+    # block_and_month_aggregated_df = block_and_month_aggregated_df.drop(columns=["Ruda-fRuda", "Cu-fCu", "Ag-fAg", "diff-Ruda", "diff-Cu", "diff-Ag"], errors='ignore')
+    # block_aggregated_df = block_aggregated_df.drop(columns=["diff-Ruda", "diff-Cu", "diff-Ag", "%rel-Ruda", "%rel-Cu", "%rel-Ag"], errors='ignore')
+
+
+    full_df = add_calculated_columns(full_df)
+
+
+    # Aggregate data by Block
+    block_aggregated_df = group_by_block(full_df)
+    # block_aggregated_df = calculate_monthly_averages(block_aggregated_df)
+    # block_aggregated_df = set_fields_values_formatting(block_aggregated_df)
+
+    # Функции для агрегации и обработки данных
+    block_and_month_aggregated_df = group_by_block_and_month(full_df)
+    # block_and_month_aggregated_df = calculate_monthly_averages(block_and_month_aggregated_df)
+    # block_and_month_aggregated_df = set_fields_values_formatting(block_and_month_aggregated_df)
+
+    # По штрекам лист
+
+    # full_df = calculate_monthly_averages(full_df)
+    # full_df = set_fields_values_formatting(full_df)
+
+    # Список столбцов, которые нужно перевести в процентный формат
+    percent_cols = [
+        "1-(Ruda-fRuda)/Ruda",
+        "1-(Cu-fCu)/Cu",
+        "1-(Ag-fAg)/Ag",
+        "1-(%Cu-%fCu)/%Cu",
+        "Товарная руда ",
+        "Cu в руде",
+        "Ag в руде",
+        "% Cu"
+    ]
+
+
+
+
+    # monthly_percent_df = calculate_monthly_average_percentages(final_df)
+
 
     # Генерация имени выходного файла
     t = datetime.now().microsecond
@@ -489,350 +792,186 @@ def generate_report_with_charts(folder_path, final_df):
     # Создаем Excel с данными и графиками
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         # Записываем таблицы в Excel
-        final_df.to_excel(writer, sheet_name="Данные", index=False)
-        aggregated_df.to_excel(writer, sheet_name="Сумм. по панелям", index=False)
+        full_df.to_excel(writer, sheet_name="По штрекам", index=False)
+        block_and_month_aggregated_df.to_excel(writer, sheet_name="Сумм. по панелям", index=False)
+        block_aggregated_df.to_excel(writer, sheet_name="Сумм. по блокам", index=False)  # New sheet
+
 
         # Вместо записи отдельных листов для "Групп. по панелям" и "Средн. по штрекам",
         # вызываем функцию для создания одного листа с графиками
-        create_excel_with_charts_on_one_sheet(monthly_avg_df, monthly_percent_df, writer)
+        create_excel_with_charts_on_one_sheet(
+            mean_values_groupped_by_month(block_and_month_aggregated_df),
+            mean_values_groupped_by_month(full_df),
+            block_aggregated_df[['Block', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
+        , writer)
+
+
+    workbook = load_workbook(output_file)
+    # Создаем и регистрируем стиль процента, если он еще не добавлен
+    if "percent_style" not in workbook.named_styles:
+        percent_style = NamedStyle(name="percent_style", number_format="0.00%")
+        workbook.add_named_style(percent_style)
+
+    # Применяем процентный стиль к указанным столбцам на нужных листах
+    for sheet_name in ["По штрекам", "Сумм. по панелям", "Сумм. по блокам"]:
+        if sheet_name in workbook.sheetnames:
+            ws = workbook[sheet_name]
+            header_row = 1
+            header_to_col = {}
+            # Поиск столбцов с нужными заголовками в первой строке
+            for cell in ws[header_row]:
+                if cell.value in percent_cols:
+                    header_to_col[cell.value] = cell.column_letter
+            # Применение процентного стиля к найденным столбцам, начиная со второй строки
+            for col_letter in header_to_col.values():
+                for row in range(header_row + 1, ws.max_row + 1):
+                    cell = ws[f"{col_letter}{row}"]
+                    # Если значение числовое, применяем процентный стиль
+                    if isinstance(cell.value, (int, float)):
+                        cell.style = "percent_style"
+
+
 
     # Freeze cell C2
-    workbook = load_workbook(output_file)
-    sheet_name = "Данные"  # Specify the sheet where you want to freeze C2
+
+    sheet_name = "По штрекам"  # Specify the sheet where you want to freeze C2
     sheet = workbook[sheet_name]
     sheet.freeze_panes = "C2"  # Set the freeze panes to C2
     workbook.save(output_file)
     # Add summary and formula rows to the first sheet
-    add_summary_and_formula_rows(output_file)
+    # add_summary_and_formula_rows(output_file)
 
-    return final_df
+    # return full_df
 
 
-from openpyxl.chart import BarChart, Reference
-from openpyxl.chart.label import DataLabelList
 
-from openpyxl.utils import get_column_letter
 
-def create_excel_with_charts_on_one_sheet1(df1, df2, writer):
+
+
+def create_excel_with_charts_on_one_sheet(df1, df2, df3, writer):
     """
-    Добавляет графики и данные для двух DataFrame на один лист Excel,
-    размещая графики справа от таблиц и обеспечивая отступы между элементами.
-
-    Args:
-        df1 (pd.DataFrame): Первый DataFrame для первого графика.
-        df2 (pd.DataFrame): Второй DataFrame для второго графика.
-        writer (pd.ExcelWriter): Экземпляр ExcelWriter для записи в файл.
-    """
-    # Форматируем числа в DataFrame до 2 знаков после запятой
-    df1 = df1.round(2)
-    df2 = df2.round(2)
-
-    # Загружаем рабочую книгу и создаем лист для графиков
-    wb = writer.book
-    ws = wb.create_sheet("Графики")
-
-    # Добавляем данные для первого DataFrame
-    headers_df1 = list(df1.columns)
-    ws.append(headers_df1)  # Добавляем заголовки для df1
-    data_start_row_df1 = ws.max_row + 1  # Начало данных для df1
-    for row in df1.itertuples(index=False, name=None):
-        ws.append(row)
-    data_end_row_df1 = ws.max_row  # Конец данных для df1
-    data_max_col_df1 = len(df1.columns)  # Количество колонок в df1
-
-    # Создаём первый график
-    chart1 = BarChart()
-    chart1.title = "Средние отклонения сгруппированные по панелям в разрезе месяцев"
-    chart1.y_axis.title = "Значения"
-    chart1.x_axis.title = "Месяцы"
-    chart1.height = 15  # Регулировка высоты для лучшего отображения
-    chart1.width = 25   # Регулировка ширины для лучшего отображения
-
-    # Включаем метки данных
-    chart1.dLbls = DataLabelList()
-    chart1.dLbls.showVal = True
-
-    # Источник данных для первого графика
-    data_range1 = Reference(ws, min_col=2, min_row=data_start_row_df1 ,
-                            max_col=data_max_col_df1, max_row=data_end_row_df1)
-    categories1 = Reference(ws, min_col=1, min_row=data_start_row_df1 ,
-                            max_row=data_end_row_df1)
-    chart1.add_data(data_range1, titles_from_data=True)
-    chart1.set_categories(categories1)
-
-    # Позиционируем первый график справа от таблицы данных
-    # Вычисляем начальный столбец для графика (добавляем 2 столбца для отступа)
-    chart_start_col1 = data_max_col_df1 + 3
-    chart_start_cell1 = f"{get_column_letter(chart_start_col1)}{data_start_row_df1 - 1}"
-    ws.add_chart(chart1, chart_start_cell1)
-
-    # Добавляем пустые строки для отступа между таблицами
-    ws.append([])
-    ws.append([])
-
-    # Добавляем данные для второго DataFrame
-    headers_df2 = list(df2.columns)
-    ws.append(headers_df2)  # Добавляем заголовки для df2
-    data_start_row_df2 = ws.max_row + 1  # Начало данных для df2
-    for row in df2.itertuples(index=False, name=None):
-        ws.append(row)
-    data_end_row_df2 = ws.max_row  # Конец данных для df2
-    data_max_col_df2 = len(df2.columns)  # Количество колонок в df2
-
-    # Создаём второй график
-    chart2 = BarChart()
-    chart2.title = "Средние отклонения по всем штрекам в разрезе месяцев"
-    chart2.y_axis.title = "Значения"
-    chart2.x_axis.title = "Месяцы"
-    chart2.height = 15  # Регулировка высоты для лучшего отображения
-    chart2.width = 25   # Регулировка ширины для лучшего отображения
-
-    # Включаем метки данных
-    chart2.dLbls = DataLabelList()
-    chart2.dLbls.showVal = True
-
-    # Источник данных для второго графика
-    data_range2 = Reference(ws, min_col=2, min_row=data_start_row_df2 - 1,
-                            max_col=data_max_col_df2, max_row=data_end_row_df2)
-    categories2 = Reference(ws, min_col=1, min_row=data_start_row_df2 - 1,
-                            max_row=data_end_row_df2)
-    chart2.add_data(data_range2, titles_from_data=True)
-    chart2.set_categories(categories2)
-
-    # Позиционируем второй график справа от второй таблицы данных
-    # Вычисляем начальный столбец для графика (добавляем 2 столбца для отступа)
-    chart_start_col2 = data_max_col_df2 + 3
-    chart_start_cell2 = f"{get_column_letter(chart_start_col2)}{data_start_row_df2 - 1}"
-    ws.add_chart(chart2, chart_start_cell2)
-
-def create_excel_with_charts_on_one_sheet2(df1, df2, writer):
-    """
-    Добавляет графики и данные для двух DataFrame на один лист Excel,
-    размещая графики справа от таблиц и обеспечивая отступы между элементами.
-
-    Args:
-        df1 (pd.DataFrame): Первый DataFrame для первого графика.
-        df2 (pd.DataFrame): Второй DataFrame для второго графика.
-        writer (pd.ExcelWriter): Экземпляр ExcelWriter для записи в файл.
-    """
-    # Форматируем числа в DataFrame до 2 знаков после запятой
-    df1 = df1.round(2)
-    df2 = df2.round(2)
-
-    # Загружаем рабочую книгу и создаем лист для графиков
-    wb = writer.book
-    ws = wb.create_sheet("Графики")
-
-    # Добавляем данные для первого DataFrame
-    headers_df1 = list(df1.columns)
-    ws.append(headers_df1)  # Добавляем заголовки для df1
-    data_start_row_df1 = ws.max_row + 1  # Начало данных для df1
-    for row in df1.itertuples(index=False, name=None):
-        ws.append(row)
-    data_end_row_df1 = ws.max_row  # Конец данных для df1
-    data_max_col_df1 = len(df1.columns)  # Количество колонок в df1
-
-    # Создаём первый график
-    chart1 = BarChart()
-    chart1.title = "Средние отклонения сгруппированные по панелям в разрезе месяцев"
-    chart1.y_axis.title = "Значения"
-    chart1.x_axis.title = "Месяцы"
-    chart1.height = 15  # Регулировка высоты для лучшего отображения
-    chart1.width = 25   # Регулировка ширины для лучшего отображения
-
-    # Включаем метки данных
-    chart1.dLbls = DataLabelList()
-    chart1.dLbls.showVal = True
-
-    # Источник данных для первого графика
-    data_range1 = Reference(ws, min_col=2, min_row=data_start_row_df1,
-                            max_col=data_max_col_df1, max_row=data_end_row_df1)
-    categories1 = Reference(ws, min_col=1, min_row=data_start_row_df1,
-                            max_row=data_end_row_df1)
-    chart1.add_data(data_range1, titles_from_data=True)
-    chart1.set_categories(categories1)
-
-    # Позиционируем первый график справа от таблицы данных
-    chart_start_col1 = data_max_col_df1 + 3
-    chart_start_row1 = data_start_row_df1 - 1  # Начальная строка для графика
-    chart_start_cell1 = f"{get_column_letter(chart_start_col1)}{chart_start_row1}"
-    ws.add_chart(chart1, chart_start_cell1)
-
-    # Добавляем пустые строки для отступа между таблицами
-    ws.append([])
-    ws.append([])
-
-    # Добавляем данные для второго DataFrame
-    headers_df2 = list(df2.columns)
-    ws.append(headers_df2)  # Добавляем заголовки для df2
-    data_start_row_df2 = ws.max_row + 1  # Начало данных для df2
-    for row in df2.itertuples(index=False, name=None):
-        ws.append(row)
-    data_end_row_df2 = ws.max_row  # Конец данных для df2
-    data_max_col_df2 = len(df2.columns)  # Количество колонок в df2
-
-    # Создаём второй график
-    chart2 = BarChart()
-    chart2.title = "Средние отклонения по всем штрекам в разрезе месяцев"
-    chart2.y_axis.title = "Значения"
-    chart2.x_axis.title = "Месяцы"
-    chart2.height = 15  # Регулировка высоты для лучшего отображения
-    chart2.width = 25   # Регулировка ширины для лучшего отображения
-
-    # Включаем метки данных
-    chart2.dLbls = DataLabelList()
-    chart2.dLbls.showVal = True
-
-    # Источник данных для второго графика
-    data_range2 = Reference(ws, min_col=2, min_row=data_start_row_df2,
-                            max_col=data_max_col_df2, max_row=data_end_row_df2)
-    categories2 = Reference(ws, min_col=1, min_row=data_start_row_df2,
-                            max_row=data_end_row_df2)
-    chart2.add_data(data_range2, titles_from_data=True)
-    chart2.set_categories(categories2)
-
-    # Позиционируем второй график справа от второй таблицы данных
-    chart_start_col2 = data_max_col_df2 + 3
-
-    # Вычисляем приблизительное количество строк, занимаемых первым графиком
-    chart_height_in_rows = int(chart1.height * 4)  # Примерное преобразование высоты графика в строки
-
-    # Определяем начальную строку для второго графика
-    chart_start_row2 = max(ws.max_row, chart_start_row1 + chart_height_in_rows + 5)
-
-    chart_start_cell2 = f"{get_column_letter(chart_start_col2)}{chart_start_row2}"
-    ws.add_chart(chart2, chart_start_cell2)
-
-from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference
-from openpyxl.chart.label import DataLabelList
-from openpyxl.utils import get_column_letter
-import pandas as pd
-
-def create_excel_with_charts_on_one_sheet(df1, df2, writer):
-    """
-    Adds charts and data for two DataFrames on one Excel sheet,
+    Adds charts and data for three DataFrames on one Excel sheet,
     placing charts to the right of the tables and ensuring offsets between elements.
 
     Args:
         df1 (pd.DataFrame): First DataFrame for the first chart.
         df2 (pd.DataFrame): Second DataFrame for the second chart.
+        df3 (pd.DataFrame): Third DataFrame for the third chart (yearly sums by block).
         writer (pd.ExcelWriter): ExcelWriter instance for writing to the file.
     """
     # Format numbers in DataFrame to 2 decimal places
-    df1 = df1.round(2)
-    df2 = df2.round(2)
+    df1 = df1.round(3)
+    df2 = df2.round(3)
+    df3 = df3.round(3)
+    # df3 = df3[['Block', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
 
     # Load the workbook and create a sheet for charts
     wb = writer.book
     ws = wb.create_sheet("Графики")
 
     ### Adding Data for the First DataFrame ###
-
-    # Append headers for df1
-    headers_df1 = list(df1.columns)
+    # headers_df1 = list(df1.columns)
+    # df1 = df1[['Месяц', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
+    # headers_df2 = ['Месяц', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']
+    headers_df1 = ["Месяц", "Товарная руда", "Cu в руде", "Ag в руде", "%Cu"]
     ws.append(headers_df1)
-    headers_row_df1 = ws.max_row  # Row number where headers are inserted
+    headers_row_df1 = ws.max_row
 
-    # Append data for df1
-    data_start_row_df1 = ws.max_row + 1  # Start row for data (after headers)
+    data_start_row_df1 = ws.max_row + 1
     for row in df1.itertuples(index=False, name=None):
         ws.append(row)
-    data_end_row_df1 = ws.max_row  # End row for data
-    data_max_col_df1 = len(df1.columns)  # Number of columns in df1
+    data_end_row_df1 = ws.max_row
+    data_max_col_df1 = len(df1.columns)
 
-    # Create the first chart
     chart1 = BarChart()
     chart1.title = "Средние отклонения сгруппированные по панелям в разрезе месяцев"
     chart1.y_axis.title = "Значения"
     chart1.x_axis.title = "Месяцы"
-    chart1.height = 15  # Adjust height for better display
-    chart1.width = 25   # Adjust width for better display
-
-    # Enable data labels
+    chart1.height = 15
+    chart1.width = 25
     chart1.dLbls = DataLabelList()
     chart1.dLbls.showVal = True
 
-    # Define data range for the first chart (include headers)
-    data_range1 = Reference(
-        ws,
-        min_col=2,
-        min_row=headers_row_df1,  # Include headers for titles
-        max_col=data_max_col_df1,
-        max_row=data_end_row_df1
-    )
-    categories1 = Reference(
-        ws,
-        min_col=1,
-        min_row=data_start_row_df1,
-        max_row=data_end_row_df1
-    )
+    data_range1 = Reference(ws, min_col=2, min_row=headers_row_df1, max_col=data_max_col_df1, max_row=data_end_row_df1)
+    categories1 = Reference(ws, min_col=1, min_row=data_start_row_df1, max_row=data_end_row_df1)
     chart1.add_data(data_range1, titles_from_data=True)
     chart1.set_categories(categories1)
 
-    # Position the first chart to the right of the data table
     chart_start_col1 = data_max_col_df1 + 3
-    chart_start_row1 = headers_row_df1  # Start row for the chart
+    chart_start_row1 = headers_row_df1
     chart_start_cell1 = f"{get_column_letter(chart_start_col1)}{chart_start_row1}"
     ws.add_chart(chart1, chart_start_cell1)
 
-    # Add empty rows for spacing between tables
     ws.append([])
     ws.append([])
 
     ### Adding Data for the Second DataFrame ###
+    # headers_df2 = list(df2.columns)
+    # df2 = df2[['Месяц', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
+    # headers_df2 = ['Месяц', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']
+    headers_df2 = ["Месяц", "Товарная руда", "Cu в руде", "Ag в руде", "%Cu"]
 
-    # Append headers for df2
-    headers_df2 = list(df2.columns)
     ws.append(headers_df2)
-    headers_row_df2 = ws.max_row  # Row number where headers are inserted
+    headers_row_df2 = ws.max_row
 
-    # Append data for df2
-    data_start_row_df2 = ws.max_row + 1  # Start row for data (after headers)
+    data_start_row_df2 = ws.max_row + 1
     for row in df2.itertuples(index=False, name=None):
         ws.append(row)
-    data_end_row_df2 = ws.max_row  # End row for data
-    data_max_col_df2 = len(df2.columns)  # Number of columns in df2
+    data_end_row_df2 = ws.max_row
+    data_max_col_df2 = len(df2.columns)
 
-    # Create the second chart
     chart2 = BarChart()
     chart2.title = "Средние отклонения по всем штрекам в разрезе месяцев"
     chart2.y_axis.title = "Значения"
     chart2.x_axis.title = "Месяцы"
-    chart2.height = 15  # Adjust height for better display
-    chart2.width = 25   # Adjust width for better display
-
-    # Enable data labels
+    chart2.height = 15
+    chart2.width = 25
     chart2.dLbls = DataLabelList()
     chart2.dLbls.showVal = True
 
-    # Define data range for the second chart (include headers)
-    data_range2 = Reference(
-        ws,
-        min_col=2,
-        min_row=headers_row_df2,  # Include headers for titles
-        max_col=data_max_col_df2,
-        max_row=data_end_row_df2
-    )
-    categories2 = Reference(
-        ws,
-        min_col=1,
-        min_row=data_start_row_df2,
-        max_row=data_end_row_df2
-    )
+    data_range2 = Reference(ws, min_col=2, min_row=headers_row_df2, max_col=data_max_col_df2, max_row=data_end_row_df2)
+    categories2 = Reference(ws, min_col=1, min_row=data_start_row_df2, max_row=data_end_row_df2)
     chart2.add_data(data_range2, titles_from_data=True)
     chart2.set_categories(categories2)
 
-    # Position the second chart to the right of the second data table
     chart_start_col2 = data_max_col_df2 + 3
-
-    # Calculate approximate number of rows occupied by the first chart
-    chart_height_in_rows = int(chart1.height * 4)  # Approximate conversion
-
-    # Determine the start row for the second chart
-    chart_start_row2 = headers_row_df2+20  # Align with the second table
+    chart_start_row2 = headers_row_df2 + 20  # Расположение графика рядом со вторым блоком данных
     chart_start_cell2 = f"{get_column_letter(chart_start_col2)}{chart_start_row2}"
     ws.add_chart(chart2, chart_start_cell2)
+
+    ws.append([])
+    ws.append([])
+
+    ### Adding Data for the Third DataFrame ###
+    # headers_df3 = list(df3.columns)
+    headers_df3 = ["Панель№","Товарная руда","Cu в руде","Ag в руде","%Cu"]
+    ws.append(headers_df3)
+    headers_row_df3 = ws.max_row
+
+    data_start_row_df3 = ws.max_row + 1
+    for row in df3.itertuples(index=False, name=None):
+        ws.append(row)
+    data_end_row_df3 = ws.max_row
+    data_max_col_df3 = len(df3.columns)
+
+    chart3 = BarChart()
+    chart3.title = "Годовые суммы по блокам/панелям"
+    chart3.y_axis.title = "Значения"
+    chart3.x_axis.title = "Блок/Панель"
+    chart3.height = 15
+    chart3.width = 25
+    chart3.dLbls = DataLabelList()
+    chart3.dLbls.showVal = True
+
+    data_range3 = Reference(ws, min_col=2, min_row=headers_row_df3, max_col=data_max_col_df3, max_row=data_end_row_df3)
+    categories3 = Reference(ws, min_col=1, min_row=data_start_row_df3+1, max_row=data_end_row_df3)
+    chart3.add_data(data_range3, titles_from_data=True)
+    chart3.set_categories(categories3)
+
+    chart_start_col3 = data_max_col_df3 + 3
+    chart_start_row3 = data_end_row_df3 + 30
+    chart_start_cell3 = f"{get_column_letter(chart_start_col3)}{chart_start_row3}"
+    ws.add_chart(chart3, chart_start_cell3)
 
 
 
@@ -863,28 +1002,6 @@ def add_calculated_columns(df):
     # Преобразуем все указанные колонки в float
     columns_to_convert = ['Ruda', 'Cu', 'Ag', 'fRuda', 'fCu', 'fAg']
 
-    # for column in columns_to_convert:
-    #     # Convert to numeric, keeping NaN and replacing invalid values with NaN
-    #     df[column] = df[column].apply(lambda x: pd.to_numeric(x, errors='coerce'))
-    #
-    #     # Replace NaN with 0 only for rows that are not explicitly missing (e.g., None)
-    #     df[column] = df[column].where(df[column].isna() | df[column].notna(), 0)
-    # for column in columns_to_convert:
-    #     # Replace None, empty strings, and NaN with 0
-    #     df[column] = df[column].replace([None, '', np.nan], 0)
-    #
-    #     # Clean up the column to handle commas and trailing non-numeric characters
-    #     df[column] = df[column].apply(lambda x: str(x).replace(',', '').strip())
-    #
-    #     # Convert valid numbers to float, leave text untouched
-    #     def convert_value(value):
-    #         try:
-    #             return float(value) if value != '' else 0  # Convert to float if possible
-    #         except ValueError:
-    #             return value  # Leave non-numeric text as-is
-    #
-    #     df[column] = df[column].apply(convert_value)
-
     for column in columns_to_convert:
         # Replace None and empty strings with NaN
         df[column] = df[column].replace([None, ''], np.nan)
@@ -902,12 +1019,12 @@ def add_calculated_columns(df):
 
 
     # Расчет dRuda, dCu, dAg (с обработкой ошибок, замена NaN на 0)
-    # df['diff-Ruda'] = abs(df['Ruda'] - df['fRuda'])
-    # df['diff-Cu'] = abs(df['Cu'] - df['fCu'])
-    # df['diff-Ag'] = abs(df['Ag'] - df['fAg'])
-    df['diff-Ruda'] = df['Ruda'] - df['fRuda']
-    df['diff-Cu'] = df['Cu'] - df['fCu']
-    df['diff-Ag'] = df['Ag'] - df['fAg']
+    df['diff-Ruda'] = abs(df['Ruda'] - df['fRuda'])
+    df['diff-Cu'] = abs(df['Cu'] - df['fCu'])
+    df['diff-Ag'] = abs(df['Ag'] - df['fAg'])
+    # df['diff-Ruda'] = df['Ruda'] - df['fRuda']
+    # df['diff-Cu'] = df['Cu'] - df['fCu']
+    # df['diff-Ag'] = df['Ag'] - df['fAg']
 
     # Замена NaN на 0, если расчет невозможен
     df['diff-Ruda'] = df['diff-Ruda'].fillna(0)
@@ -920,14 +1037,32 @@ def add_calculated_columns(df):
     # df['%rel-Ag'] = abs(np.where(df['Ag'] != 0, df['diff-Ag'] / df['Ag'], 1.0) * 100)  # 100% если Ag == 0
 
     # Расчет %Ruda, %Cu, %Ag (с обработкой деления на ноль или NaN и ограничением максимум 100)
-    df['(Ruda-fRuda)/Ruda'] = np.clip(np.where(df['Ruda'] != 0, 1-abs(df['diff-Ruda']) / df['Ruda'], 1.0) * 100, 0, 100)
-    df['(Cu-fCu)/Cu'] = np.clip(np.where(df['Cu'] != 0, 1-abs(df['diff-Cu']) / df['Cu'], 1.0) * 100, 0, 100)
-    df['(Ag-fAg)/Ag'] = np.clip(np.where(df['Ag'] != 0, 1-abs(df['diff-Ag']) / df['Ag'], 1.0) * 100, 0, 100)
+    df['1-(Ruda-fRuda)/Ruda'] = np.clip(np.where(df['Ruda'] != 0, 1 - df['diff-Ruda'] / df['Ruda'], 1.0), 0, 100)
+    df['1-(Cu-fCu)/Cu'] = np.clip(np.where(df['Cu'] != 0, 1 - df['diff-Cu'] / df['Cu'], 1.0) , 0, 100)
+    df['1-(Ag-fAg)/Ag'] = np.clip(np.where(df['Ag'] != 0, 1 - df['diff-Ag'] / df['Ag'], 1.0) , 0, 100)
 
     # Замена NaN на 100%, если расчет невозможен
-    df['(Ruda-fRuda)/Ruda'] = df['(Ruda-fRuda)/Ruda'].fillna(100)
-    df['(Cu-fCu)/Cu'] = df['(Cu-fCu)/Cu'].fillna(100)
-    df['(Ag-fAg)/Ag'] = df['(Ag-fAg)/Ag'].fillna(100)
+    df['1-(Ruda-fRuda)/Ruda'] = df['1-(Ruda-fRuda)/Ruda'].fillna(1)
+    df['1-(Cu-fCu)/Cu'] = df['1-(Cu-fCu)/Cu'].fillna(1)
+    df['1-(Ag-fAg)/Ag'] = df['1-(Ag-fAg)/Ag'].fillna(1)
+
+    # Добавляем новые расчёты: %Cu и %fCu
+    df['%Cu'] = np.where(
+        (df['Cu'] == 0) & (df['fCu'] != 0),
+        0,
+        np.clip(np.where(df['Ruda'] != 0, df['Cu'] / df['Ruda'], 1.0), 0, 100)
+    )
+    df['%fCu'] = np.where(
+        (df['fCu'] == 0) & (df['Cu'] != 0),
+        0,
+        np.clip(np.where(df['fRuda'] != 0, df['fCu'] / df['fRuda'], 1.0), 0, 100)
+    )
+    # Расчёт аналогичных метрик для %Cu и %Ag
+    df['1-(%Cu-%fCu)/%Cu'] = np.clip(
+        np.where((df['Ruda'] != 0) & (df['fRuda'] != 0),
+                 (1 - ((df['Cu'] / df['Ruda'] - df['fCu'] / df['fRuda']) / ((df['Cu'] / df['Ruda'])) )),
+                 1),
+        0, 100)
 
     # Добавляем дополнительные колонки p>0, f>0, p=0, f=0
     df['p>0'] = np.where(df['Ruda'] > 0, 1, 0)
@@ -937,54 +1072,22 @@ def add_calculated_columns(df):
 
     return df
 
-# def add_calculated_columns(df):
-#     """
-#     Добавляет расчетные столбцы в DataFrame:
-#     - dRuda, dCu, dAg
-#     - %Ruda, %Cu, %Ag
-#
-#     :param df: pandas DataFrame, содержащий исходные столбцы
-#     :return: pandas DataFrame с добавленными расчетными столбцами
-#     """
-#     # Преобразование колонок в числовой формат
-#     numeric_columns = ['Ruda', 'fRuda', 'Cu', 'fCu', 'Ag', 'fAg']
-#     for col in numeric_columns:
-#         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)  # Преобразование и замена NaN на 0
-#
-#     # Расчет dRuda, dCu, dAg
-#     df['Ruda-fRuda'] = abs(df['Ruda'] - df['fRuda'])
-#     df['Cu-fCu'] = abs(df['Cu'] - df['fCu'])
-#     df['Ag-fAg'] = abs(df['Ag'] - df['fAg'])
-#
-#     # Расчет %Ruda, %Cu, %Ag
-#     df['(Ruda-fRuda)/Ruda'] = abs(np.where(df['Ruda'] != 0, df['Ruda-fRuda'] / df['Ruda'], 1.0) * 100)
-#     df['(Cu-fCu)/Cu'] = abs(np.where(df['Cu'] != 0, df['Cu-fCu'] / df['Cu'], 1.0) * 100)
-#     df['(Ag-fAg)/Ag'] = abs(np.where(df['Ag'] != 0, df['Ag-fAg'] / df['Ag'], 1.0) * 100)
-#
-#     return df
 
-
-def process_monthly_avg(df):
+def set_fields_values_formatting(df):
     """
     Преобразует DataFrame monthly_avg:
     - Переименовывает колонки.
     - Конвертирует числовые колонки в числовой формат.
     - Сортирует строки по порядку месяцев.
-
-    Args:
-        df (pd.DataFrame): Исходный DataFrame.
-
-    Returns:
-        pd.DataFrame: Обработанный DataFrame.
     """
-    # Заменяем имена колонок
-    df.columns = ['Месяц', 'Товарная руда (СМТ)', 'Cu в руде', 'Ag в руде']
+    # Обновлённое переименование колонок для 6 столбцов
+    df.columns = ['Месяц', 'Товарная руда (СМТ)', 'Cu в руде', 'Ag в руде', 'содерж.Cu']
 
     # Преобразуем последние три колонки в числовой формат
-    numeric_columns = ['Товарная руда (СМТ)', 'Cu в руде', 'Ag в руде']
+    numeric_columns = ['Товарная руда (СМТ)', 'Cu в руде', 'Ag в руде', 'содерж.Cu']
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors='coerce')
 
-    # Создаем порядок месяцев
+    # Создаём порядок месяцев
     month_order = [
         "январь", "февраль", "март", "апрель", "май", "июнь",
         "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"
@@ -996,7 +1099,9 @@ def process_monthly_avg(df):
 
     return df
 
-def aggregate_and_calculate(df):
+
+
+def group_by_block_and_month(df):
     """
     Группирует DataFrame по месяцам и штрекам, суммирует указанные колонки
     и добавляет расчетные колонки.
@@ -1008,7 +1113,9 @@ def aggregate_and_calculate(df):
     sum_columns = ['Ruda', 'fRuda', 'Cu', 'fCu', 'Ag', 'fAg']
 
     # Группировка по месяцам и панелям, вычисление суммы
-    grouped = df.groupby(['month', 'Horizont','Panel'], as_index=False)[sum_columns].sum()
+    # grouped = df.groupby(['month', 'Horizont','Panel'], as_index=False)[sum_columns].sum()
+    grouped = df.groupby(['Block','month' ], as_index=False)[sum_columns].sum()
+
 
     # Добавляем расчетные колонки
     grouped['Ruda-fRuda'] = grouped['Ruda'] - grouped['fRuda']
@@ -1021,23 +1128,35 @@ def aggregate_and_calculate(df):
     grouped['Ag-fAg'] = grouped['Ag-fAg'].fillna(0)
 
     # Добавляем расчетные колонки в процентах с ограничением максимум 100
-    grouped['(Ruda-fRuda)/Ruda'] = np.clip(
-        np.where(grouped['Ruda'] != 0, 1-abs(grouped['Ruda-fRuda'] / grouped['Ruda']), 1.0) * 100, 0, 100
+    grouped['1-(Ruda-fRuda)/Ruda'] = np.clip(
+        np.where(grouped['Ruda'] != 0, 1-abs(grouped['Ruda-fRuda'] / grouped['Ruda']), 1.0), 0, 100
     )
-    grouped['(Cu-fCu)/Cu'] = np.clip(
-        np.where(grouped['Cu'] != 0, 1-abs(grouped['Cu-fCu'] / grouped['Cu']), 1.0) * 100, 0, 100
+    grouped['1-(Cu-fCu)/Cu'] = np.clip(
+        np.where(grouped['Cu'] != 0, 1-abs(grouped['Cu-fCu'] / grouped['Cu']), 1.0), 0, 100
     )
-    grouped['(Ag-fAg)/Ag'] = np.clip(
-        np.where(grouped['Ag'] != 0, 1-abs(grouped['Ag-fAg'] / grouped['Ag']), 1.0) * 100, 0, 100
+    grouped['1-(Ag-fAg)/Ag'] = np.clip(
+        np.where(grouped['Ag'] != 0, 1-abs(grouped['Ag-fAg'] / grouped['Ag']), 1.0), 0, 100
     )
+
+    # Добавляем расчёт %Cu и %fCu для данной группировки
+    grouped['%Cu'] = np.where(grouped['Ruda'] != 0, grouped['Cu'] / grouped['Ruda'] * 100, 0)
+    grouped['%fCu'] = np.where(grouped['fRuda'] != 0, grouped['fCu'] / grouped['fRuda'] * 100, 0)
+
+    grouped['1-(%Cu-%fCu)/%Cu'] = np.clip(
+        np.where((grouped['Ruda'] != 0) & (grouped['fRuda'] != 0),
+                 (1 - ((grouped['Cu'] / grouped['Ruda'] - grouped['fCu'] / grouped['fRuda']) / ((grouped['Cu'] / grouped['Ruda'])) )),
+                 1),
+        0, 100)
+
+    grouped = grouped[['Block','month', 'Ruda', 'fRuda', 'Cu', 'fCu', 'Ag', 'fAg','%Cu','%fCu','1-(Ruda-fRuda)/Ruda','1-(Cu-fCu)/Cu','1-(Ag-fAg)/Ag','1-(%Cu-%fCu)/%Cu']]
+    grouped['p>0'] = np.where(grouped['Ruda'] > 0, 1, 0)
+    grouped['f>0'] = np.where(grouped['fRuda'] > 0, 1, 0)
 
     return grouped
 
 
 
-
-
-def calculate_monthly_averages(df):
+def mean_values_groupped_by_month(df):
     """
     Группирует DataFrame по месяцам, вычисляет абсолютное среднее значение для %tRuda, %tCu, %tAg
     и записывает вычитание из 1 в виде процентов в колонки Ruda, Cu, Ag.
@@ -1049,72 +1168,181 @@ def calculate_monthly_averages(df):
 
     # # Средние значения по месяцам с расчётом абсолютных значений
     # monthly_avg = df.groupby('month', as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag']].apply( lambda x: x.abs().mean() )
-    monthly_avg = df.groupby('month', as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag']].apply( lambda x: x.mean())
+    monthly_avg = df.groupby('month', as_index=False)[
+        ['1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']
+    ].mean()
+    # monthly_avg = df.groupby(['month', 'Block'], as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag']].mean()
 
-    # Вычитание из 1, перевод в проценты и ограничение максимум 100
-    # monthly_avg['aver-relation_Ruda'] = (1 - monthly_avg['(Ruda-fRuda)/Ruda'])*100
-    # monthly_avg['aver-relation_Cu'] = (1 - monthly_avg['(Cu-fCu)/Cu'] )*100
-    # monthly_avg['aver-relation_Ag'] = (1 - monthly_avg['(Ag-fAg)/Ag'] )*100
 
-    monthly_avg['aver-relation_Ruda'] = monthly_avg['(Ruda-fRuda)/Ruda']
-    monthly_avg['aver-relation_Cu'] = monthly_avg['(Cu-fCu)/Cu']
-    monthly_avg['aver-relation_Ag'] = monthly_avg['(Ag-fAg)/Ag']
+    # monthly_avg['aver-relation_Ruda'] = monthly_avg['1-(Ruda-fRuda)/Ruda']
+    # monthly_avg['aver-relation_Cu'] = monthly_avg['1-(Cu-fCu)/Cu']
+    # monthly_avg['aver-relation_Ag'] = monthly_avg['1-(Ag-fAg)/Ag']
+    # monthly_avg['aver-%Cu'] = monthly_avg['%Cu']
+    # monthly_avg['aver-%fCu'] = monthly_avg['%fCu']
+
+    # monthly_avg['1-(%Cu-%fCu)/%Cu'] = np.clip(
+    #     np.where((monthly_avg['Ruda'] != 0) & (monthly_avg['fRuda'] != 0),
+    #              (1 - ((monthly_avg['Cu'] / monthly_avg['Ruda'] - monthly_avg['fCu'] / monthly_avg['fRuda']) / ((monthly_avg['Cu'] / monthly_avg['Ruda'])) )),
+    #              1),
+    #     0, 100)
+
 
     # Оставляем только нужные колонки
-    monthly_avg = monthly_avg[['month', 'aver-relation_Ruda', 'aver-relation_Cu', 'aver-relation_Ag']]
+    # monthly_avg = monthly_avg[['month', 'aver-relation_Ruda', 'aver-relation_Cu', 'aver-relation_Ag', 'aver-%Cu', 'aver-%fCu']]
+    monthly_avg = monthly_avg[['month', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
     return monthly_avg
 
 
-
-def calculate_monthly_average_percentages(df):
+def mean_values_groupped_by_month_and_block(df):
     """
-    Группирует исходный DataFrame по месяцам, вычисляет абсолютное среднее значение для %Ruda, %Cu, %Ag,
-    а затем вычитает это значение из 1, переводит в проценты и ограничивает максимум 100.
+    Группирует DataFrame по месяцам, вычисляет абсолютное среднее значение для %tRuda, %tCu, %tAg
+    и записывает вычитание из 1 в виде процентов в колонки Ruda, Cu, Ag.
+    Исключает февраль и сентябрь из расчета.
 
-    :param df: Исходный DataFrame с колонками %Ruda, %Cu, %Ag.
+    :param df: DataFrame, содержащий колонки month, %tRuda, %tCu, %tAg.
     :return: Новый DataFrame с агрегированными данными.
     """
-    # # Группировка по месяцам и вычисление абсолютных средних значений
-    # monthly_avg = df.groupby('month', as_index=False)[['(diff-Ruda)/Ruda', '(diff-Cu)/Cu', '(diff-Ag)/Ag']].apply(
-    #     lambda x: np.clip(x.abs().mean(), 0, 100)
-    # )
 
-    # Группировка по месяцам и вычисление абсолютных средних значений
+    # # Средние значения по месяцам с расчётом абсолютных значений
     # monthly_avg = df.groupby('month', as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag']].apply( lambda x: x.abs().mean() )
-    monthly_avg = df.groupby('month', as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag']].apply( lambda x: x.mean())
+    # monthly_avg = df.groupby('month', as_index=False)[
+    #     ['1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']
+    # ].mean()
+    monthly_avg = df.groupby(['month', 'Block'], as_index=False)[['(Ruda-fRuda)/Ruda', '(Cu-fCu)/Cu', '(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']].mean()
 
 
-    # Вычитание средних значений из 1, взятие абсолютного значения, перевод в проценты и ограничение результата максимум 100
-    # monthly_avg['otlonenie-Ruda'] = (1 - monthly_avg['(Ruda-fRuda)/Ruda'] )*100
-    # monthly_avg['otlonenie-Cu'] = (1 - monthly_avg['(Cu-fCu)/Cu']  )*100
-    # monthly_avg['otlonenie-Ag'] = (1 - monthly_avg['(Ag-fAg)/Ag'] )*100
+    # monthly_avg['aver-relation_Ruda'] = monthly_avg['1-(Ruda-fRuda)/Ruda']
+    # monthly_avg['aver-relation_Cu'] = monthly_avg['1-(Cu-fCu)/Cu']
+    # monthly_avg['aver-relation_Ag'] = monthly_avg['1-(Ag-fAg)/Ag']
+    # monthly_avg['aver-%Cu'] = monthly_avg['%Cu']
+    # monthly_avg['aver-%fCu'] = monthly_avg['%fCu']
 
-    monthly_avg['otlonenie-Ruda'] = monthly_avg['(Ruda-fRuda)/Ruda']
-    monthly_avg['otlonenie-Cu'] = monthly_avg['(Cu-fCu)/Cu']
-    monthly_avg['otlonenie-Ag'] = monthly_avg['(Ag-fAg)/Ag']
+    # monthly_avg['1-(%Cu-%fCu)/%Cu'] = np.clip(
+    #     np.where((monthly_avg['Ruda'] != 0) & (monthly_avg['fRuda'] != 0),
+    #              (1 - ((monthly_avg['Cu'] / monthly_avg['Ruda'] - monthly_avg['fCu'] / monthly_avg['fRuda']) / ((monthly_avg['Cu'] / monthly_avg['Ruda'])) )),
+    #              1),
+    #     0, 100)
+
 
     # Оставляем только нужные колонки
-    monthly_avg = monthly_avg[['month', 'otlonenie-Ruda', 'otlonenie-Cu', 'otlonenie-Ag']]
+    # monthly_avg = monthly_avg[['month', 'aver-relation_Ruda', 'aver-relation_Cu', 'aver-relation_Ag', 'aver-%Cu', 'aver-%fCu']]
+    monthly_avg = monthly_avg[["block",'month', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
+
+    # Создаём порядок месяцев
+    month_order = [
+        "январь", "февраль", "март", "апрель", "май", "июнь",
+        "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"
+    ]
+
+    # Сортируем строки по порядку месяцев
+    monthly_avg['Месяц'] = pd.Categorical(monthly_avg['Месяц'], categories=month_order, ordered=True)
+    monthly_avg = monthly_avg.sort_values(by='Месяц')
+
     return monthly_avg
 
+
+
+# def mean_values_groupped_by_month(df):
+#     """
+#     Группирует исходный DataFrame по месяцам, вычисляет средние значения для
+#     %Ruda, %Cu, %Ag, а также для %Cu и %fCu,
+#     и записывает эти значения в соответствующие колонки.
+#     """
+#     # Группировка по месяцам и вычисление средних значений
+#     monthly_avg = df.groupby('month', as_index=False)[
+#         ['1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '%Cu', '%fCu']
+#     ].mean()
+#
+#     # Переименование и сохранение рассчитанных процентов в новые колонки
+#     monthly_avg['otlonenie-Ruda'] = monthly_avg['1-(Ruda-fRuda)/Ruda']
+#     monthly_avg['otlonenie-Cu'] = monthly_avg['1-(Cu-fCu)/Cu']
+#     monthly_avg['otlonenie-Ag'] = monthly_avg['1-(Ag-fAg)/Ag']
+#     monthly_avg['otlonenie-%Cu'] = monthly_avg['%Cu']
+#     monthly_avg['otlonenie-%fCu'] = monthly_avg['%fCu']
+#
+#     # Оставляем только необходимые колонки в итоговом DataFrame
+#     monthly_avg = monthly_avg[
+#         ['month', 'otlonenie-Ruda', 'otlonenie-Cu', 'otlonenie-Ag', 'otlonenie-%Cu', 'otlonenie-%fCu']
+#     ]
+#
+#
+#     return monthly_avg
+
+
+
+def group_by_block(df):
+    """
+     Группирует DataFrame по месяцам и штрекам, суммирует указанные колонки
+     и добавляет расчетные колонки.
+
+     :param df: Исходный DataFrame
+     :return: Новый DataFrame с расчетными колонками
+     """
+    # Указываем, какие колонки нужно суммировать
+    sum_columns = ['Ruda', 'fRuda', 'Cu', 'fCu', 'Ag', 'fAg']
+
+    # Группировка по месяцам и панелям, вычисление суммы
+    # grouped = df.groupby(['month', 'Horizont','Panel'], as_index=False)[sum_columns].sum()
+    grouped = df.groupby(['Block', ], as_index=False)[sum_columns].sum()
+
+    # Добавляем расчетные колонки
+    grouped['Ruda-fRuda'] = grouped['Ruda'] - grouped['fRuda']
+    grouped['Cu-fCu'] = grouped['Cu'] - grouped['fCu']
+    grouped['Ag-fAg'] = grouped['Ag'] - grouped['fAg']
+
+    # Замена ошибок на 0
+    grouped['Ruda-fRuda'] = grouped['Ruda-fRuda'].fillna(0)
+    grouped['Cu-fCu'] = grouped['Cu-fCu'].fillna(0)
+    grouped['Ag-fAg'] = grouped['Ag-fAg'].fillna(0)
+
+    # Добавляем расчёт %Cu и %fCu для данной группировки
+    grouped['%Cu'] = np.where(grouped['Ruda'] != 0, grouped['Cu'] / grouped['Ruda'], 0)
+    grouped['%fCu'] = np.where(grouped['fRuda'] != 0, grouped['fCu'] / grouped['fRuda'] , 0)
+
+
+    # Добавляем расчетные колонки в процентах с ограничением максимум 100
+    grouped['1-(Ruda-fRuda)/Ruda'] = np.clip(
+        np.where(grouped['Ruda'] != 0, 1 - abs(grouped['Ruda-fRuda'] / grouped['Ruda']), 1.0), 0, 100
+    )
+    grouped['1-(Cu-fCu)/Cu'] = np.clip(
+        np.where(grouped['Cu'] != 0, 1 - abs(grouped['Cu-fCu'] / grouped['Cu']), 1.0), 0, 100
+    )
+    grouped['1-(Ag-fAg)/Ag'] = np.clip(
+        np.where(grouped['Ag'] != 0, 1 - abs(grouped['Ag-fAg'] / grouped['Ag']), 1.0), 0, 100
+    )
+
+    grouped['1-(%Cu-%fCu)/%Cu'] = np.clip(
+        np.where((grouped['Ruda'] != 0) & (grouped['fRuda'] != 0),
+                 (1 - ((grouped['Cu'] / grouped['Ruda'] - grouped['fCu'] / grouped['fRuda']) / (
+                 (grouped['Cu'] / grouped['Ruda'])))),
+                 1),
+        0, 100)
+
+    grouped['p>0'] = np.where(grouped['Ruda'] > 0, 1, 0)
+    grouped['f>0'] = np.where(grouped['fRuda'] > 0, 1, 0)
+
+    # grouped = grouped[['Block', '1-(Ruda-fRuda)/Ruda', '1-(Cu-fCu)/Cu', '1-(Ag-fAg)/Ag', '1-(%Cu-%fCu)/%Cu']]
+    #
+    # grouped.columns= ['Панель', 'Товарная руда (СМТ)', 'Cu в руде', 'Ag в руде', 'содерж.Cu']
+
+    return grouped
 
 
 
 # Пример использования:
-
+tip =1
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ЮЖР ИПГ 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__Шатыркуль ИПГ 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ИПГ Саяк 3 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__Жомарт ИПГ 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ИПГ Жайсан 2024'
-# directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ВЖР ИПГ 2024'
+directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ВЖР ИПГ 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__Жиланды ИПГ 2024'
 # directory =r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__ЗР ИПГ 2024'
 # directory = r'C:\Users\delxps\Documents\Kazakhmys\_alibek\__Конырат ИПГ 2024'
 # directory = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\__Акбастау ИПГ 2024"
 # directory = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\__ИПГ 2024 С-1"
-directory = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\__Нурказган ИПГ 2024"   # ----N
-# directory = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\Хаджиконган ИПГ 2024"   # ----N
+# directory,tip = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\__Нурказган ИПГ 2024",2   # ----N
+# directory,tip = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\Хаджиконган ИПГ 2024"   # ----N
 # directory = r"C:\Users\delxps\Documents\Kazakhmys\_alibek\__Абыз ИПГ 2024"
-final_data = load_excel_data_with_flex(directory)
-
+final_data = load_excel_data_with_flex(directory,tip)
