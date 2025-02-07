@@ -758,8 +758,12 @@ def load_excel_data_with_flex(folder_path, tip=1, max_rows=500):
             row_to_data_index = { real_row: i for i, real_row in enumerate(visible_rows) }
             max_col_count = max(len(r) for r in rows_data)
 
-            # unmerge horizontally
-            unmerge_horizontal_cells_in_memory(rows_data, merged_ranges, row_to_data_index, max_col_count)
+            try:
+                # unmerge horizontally
+                unmerge_horizontal_cells_in_memory(rows_data, merged_ranges, row_to_data_index, max_col_count+1)
+                "yep"
+            except:
+                unmerge_horizontal_cells_in_memory(rows_data, merged_ranges, row_to_data_index, max_col_count)
 
             # fill merged cells in the first 3 yellow columns (like your old code)
             # fill_merged_cells_in_first_yellow_column_in_memory(
