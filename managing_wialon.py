@@ -89,7 +89,9 @@ def get_report(browser, context, page, start_date, end_date):
 
     page.locator("#report_templates_filter_reports").click()
     # page.locator("div").filter(has_text=re.compile(r"^сводка$")).first.click()
-    page.locator("div").filter(has_text=re.compile(r"^моточасы$")).first.click()
+    # page.locator("div").filter(has_text=re.compile(r"^моточасы$")).first.click()
+    page.locator("div").filter(has_text=re.compile(r"^Сливы-Заправки$")).first.click()
+
 
     # page.get_by_role("cell", name="").locator("#user_notification_info_icon_id").click()
 
@@ -161,11 +163,11 @@ def get_report(browser, context, page, start_date, end_date):
             raise Exception("Сервер не начал выполнять запрос в течение 70 секунд!")
 
         # Ждем завершения выполнения (исчезновения индикатора)
-        waiting_locator.wait_for(state="hidden", timeout=65000)  # Ждём максимум 10 минут
+        waiting_locator.wait_for(state="hidden", timeout=75000)  # Ждём максимум 10 минут
         print("Запрос успешно выполнен!")
 
         locator = page.locator("#report_result_buttons_contanier > label:nth-child(4) > ._m-0")
-        locator.wait_for(state="visible", timeout=60000)
+        locator.wait_for(state="visible", timeout=80000)
 
         with page.expect_download() as download_info:
             page.locator("#report_result_buttons_contanier > label:nth-child(4) > ._m-0").click()
@@ -201,7 +203,7 @@ with sync_playwright() as playwright:
     # remove_objects_from_group(browser, context, page)
 
 
-    start_date = datetime(2024, 1, 1)  # 01.01.2024
+    start_date = datetime(2024, 5, 1)  # 01.01.2024
     end_date = datetime(2024, 12, 31)  # 31.12.2024
     get_report(browser, context, page, start_date, end_date)
 
